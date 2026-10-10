@@ -57,6 +57,7 @@ import com.virajgiri.triptrack.domain.billing.BillingResult
 import com.virajgiri.triptrack.domain.billing.TripInputValidator
 import com.virajgiri.triptrack.domain.billing.TripPackage
 import com.virajgiri.triptrack.util.InvoicePdfExporter
+import com.virajgiri.triptrack.sync.FirestoreSyncWorker
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
@@ -75,14 +76,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = TripTrackDatabase.getInstance(applicationContext)
-        val repository = TripRepository(db.tripDao(), db.clientDao(), db.billDao())
-        setContent { MaterialTheme { TripTrackApp(repository) } }
+        val initialOwnerUid = runCatching {
+            if (FirebaseApp.getApps(applicationContext).isNotEmpty()) {
+                FirebaseAuth.getInstance().currentUser?.uid ?: "local"
+            } else "local"
+        }.getOrDefault("local")
+        setContent {
+            MaterialTheme {
+                var ownerUid by remember { mutableStateOf(initialOwnerUid) }
+                val repository = remember(ownerUid) {
+                    TripRepository(db.tripDao(), db.clientDao(), db.billDao(), ownerUid)
+                }
+                TripTrackApp(repository, ownerUid) { newOwnerUid -> ownerUid = newOwnerUid }
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TripTrackApp(repository: TripRepository) {
+private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerChanged: (String) -> Unit) {
     var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
     var editingTrip by remember { mutableStateOf<TripEntity?>(null) }
     val trips by repository.trips.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -149,6 +162,7 @@ private fun TripTrackApp(repository: TripRepository) {
                                         )
                                         if (form.id == null) repository.save(trip) else repository.updateTrip(trip)
                                     }.onSuccess {
+                                        FirestoreSyncWorker.enqueue(context, ownerUid)
                                         snackbar.showSnackbar(if (form.id == null) "Trip saved on this device." else "Trip updated.")
                                         editingTrip = null
                                         selectedTab = AppTab.Trips
@@ -174,6 +188,7 @@ private fun TripTrackApp(repository: TripRepository) {
                             runCatching {
                                 val snapshot = InvoiceSnapshotFactory.create(trip, result.bill)
                                 repository.saveBill(snapshot)
+                                FirestoreSyncWorker.enqueue(context, ownerUid)
                                 val pdf = InvoicePdfExporter.createPdf(context, snapshot)
                                 context.startActivity(Intent.createChooser(InvoicePdfExporter.shareIntent(context, pdf), "Share TripTrack invoice"))
                             }.onSuccess {
@@ -204,7 +219,10 @@ private fun TripTrackApp(repository: TripRepository) {
                     clients = clients,
                     onSave = { client -> scope.launch {
                         runCatching { repository.saveClient(client) }
-                            .onSuccess { snackbar.showSnackbar("Client and rate card saved.") }
+                            .onSuccess {
+                                FirestoreSyncWorker.enqueue(context, ownerUid)
+                                snackbar.showSnackbar("Client and rate card saved.")
+                            }
                             .onFailure { snackbar.showSnackbar("Could not save client: ${it.message ?: "unknown error"}") }
                     } },
                     onDelete = { id -> scope.launch {
@@ -213,7 +231,24 @@ private fun TripTrackApp(repository: TripRepository) {
                             .onFailure { snackbar.showSnackbar("Could not delete client.") }
                     } }
                 )
-                AppTab.Profile -> ProfileScreen()
+                AppTab.Profile -> ProfileScreen(
+                    ownerUid = ownerUid,
+                    onOwnerChanged = onOwnerChanged,
+                    onImportLocalData = {
+                        scope.launch {
+                            runCatching { repository.claimLocalDataForThisAccount() }
+                                .onSuccess { count ->
+                                    FirestoreSyncWorker.enqueue(context, ownerUid)
+                                    snackbar.showSnackbar("Imported $count local records. Cloud upload queued.")
+                                }
+                                .onFailure { snackbar.showSnackbar(it.message ?: "Could not import local data.") }
+                        }
+                    },
+                    onSyncNow = {
+                        FirestoreSyncWorker.enqueue(context, ownerUid)
+                        scope.launch { snackbar.showSnackbar("Cloud upload queued for this account.") }
+                    }
+                )
             }
         }
     }
@@ -459,7 +494,7 @@ private fun FormField(label: String, value: String, onValueChange: (String) -> U
 }
 
 @Composable
-private fun ProfileScreen() {
+private fun ProfileScreen(ownerUid: String, onOwnerChanged: (String) -> Unit, onImportLocalData: () -> Unit, onSyncNow: () -> Unit) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("triptrack_driver_profile", android.content.Context.MODE_PRIVATE) }
     var driverName by remember { mutableStateOf(preferences.getString("driverName", "") ?: "") }
@@ -509,11 +544,15 @@ private fun ProfileScreen() {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Signed in", style = MaterialTheme.typography.titleMedium)
                 Text(currentUser.email ?: currentUser.uid)
-                Text("Authentication is connected. Firestore sync is not enabled yet.")
+                Text("Account-scoped local records are separated by UID.")
+                Text("Cloud upload sends pending records to this account. It does not download remote changes yet.")
+                Button(onClick = onSyncNow, modifier = Modifier.fillMaxWidth()) { Text("Sync pending records") }
+                Button(onClick = onImportLocalData, modifier = Modifier.fillMaxWidth()) { Text("Import local device records to this account") }
                 Button(onClick = {
                     auth.signOut()
+                    onOwnerChanged("local")
                     refresh++
-                    message = "Signed out."
+                    message = "Signed out. This device now shows only local records."
                 }) { Text("Sign out") }
             }
         }
@@ -529,6 +568,8 @@ private fun ProfileScreen() {
                     else auth.signInWithEmailAndPassword(email.trim(), password)
                 task.addOnCompleteListener { result ->
                     if (result.isSuccessful) {
+                        val uid = result.result?.user?.uid
+                        if (uid != null) onOwnerChanged(uid)
                         refresh++
                         message = if (createAccount) "Account created and signed in." else "Signed in."
                     } else {
