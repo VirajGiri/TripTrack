@@ -21,7 +21,10 @@ class TripRepository(
     val bills = billDao.observeAll(ownerUid)
 
     suspend fun save(trip: TripEntity) = dao.insert(trip.copy(ownerUid = ownerUid, syncStatus = "PENDING"))
-    suspend fun updateTrip(trip: TripEntity) = dao.update(trip.copy(ownerUid = ownerUid, syncStatus = "PENDING"))
+    suspend fun updateTrip(trip: TripEntity) {
+        require(dao.findById(trip.id, ownerUid) != null) { "Trip does not belong to the active account." }
+        dao.update(trip.copy(ownerUid = ownerUid, syncStatus = "PENDING"))
+    }
     suspend fun deleteTrip(id: String) = dao.deleteById(id, ownerUid)
     suspend fun saveClient(client: ClientEntity) = clientDao.upsert(client.copy(ownerUid = ownerUid, syncStatus = "PENDING"))
     suspend fun deleteClient(id: String) = clientDao.deleteById(id, ownerUid)
