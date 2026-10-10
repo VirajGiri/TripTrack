@@ -149,7 +149,8 @@ class FirestoreSyncWorker(
                     "endOdometerKm" to trip.endOdometerKm, "tollPaise" to trip.tollPaise,
                     "otherExpensePaise" to trip.otherExpensePaise, "distanceKm" to trip.distanceKm,
                     "durationMinutes" to trip.durationMinutes,
-                    "createdAtEpochMillis" to trip.createdAtEpochMillis
+                    "createdAtEpochMillis" to trip.createdAtEpochMillis,
+                    "updatedAtEpochMillis" to trip.updatedAtEpochMillis
                 )
                 Tasks.await(userCollection.collection("trips").document(trip.id).set(payload))
                 database.tripDao().markSynced(trip.id, requestedUid)
