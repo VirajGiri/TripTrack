@@ -10,16 +10,18 @@
 - Billing calculation for pickup/drop, local and single-day outstation trips; missing rates block billing.
 - Invoice line-item snapshots and PDF generation/sharing through Android's share sheet.
 - Saved invoice history with PDF re-export.
+- Trip edit and confirmed delete; prior invoice snapshots are retained.
+- Firebase email/password sign-in and account creation UI, enabled when project config is present.
 - Firestore security rules scoped to each authenticated user's UID.
 - Unit tests for billing boundaries and trip validation.
 - GitHub Actions workflow for Android unit tests and debug APK build.
 
 ## Pending / blocked on configuration
-- Firebase Authentication UI and live Firestore synchronization. A real Firebase project and `google-services.json` are required before these can be completed safely.
+- Live Firestore synchronization and user-scoped ownership for local records. Do not treat authentication as data sync.
 - Driver and vehicle profile editing.
-- Trip edit/delete.
 - Multi-day outstation day-wise distance and billing.
 - Build/test workflow execution has not yet been observed; check GitHub Actions after push.
+- The Firebase Console must have Email/Password auth enabled; add `app/google-services.json` locally to initialize Firebase. Do not commit service-account keys.
 
 ## Billing notes
 - Missing rates are never guessed.
