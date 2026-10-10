@@ -5,7 +5,7 @@
 - Room local database with non-destructive migrations for trips, clients/rate cards, invoice snapshots, account ownership and modification timestamps.
 - Manual trip entry only; no GPS or automatic trip tracking.
 - Validation for date/time, non-negative odometer and expense values; overnight duration support.
-- Dashboard trip count, total kilometres and duty duration from Room.
+- Dashboard trip count, distance, duty time and recorded expenses with daily, weekly, monthly and yearly filters.
 - Client create/edit/delete and configurable package rates; blank rates remain unconfigured.
 - Billing calculation for pickup/drop, local and single-day outstation trips; missing rates block billing.
 - Invoice line-item snapshots and PDF generation/sharing through Android's share sheet.
