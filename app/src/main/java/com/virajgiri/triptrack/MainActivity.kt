@@ -258,7 +258,7 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
                     },
                     onSyncNow = {
                         FirestoreSyncWorker.enqueue(context, ownerUid)
-                        scope.launch { snackbar.showSnackbar("Cloud upload queued for this account.") }
+                        scope.launch { snackbar.showSnackbar("Cloud sync queued for this account.") }
                     }
                 )
             }
