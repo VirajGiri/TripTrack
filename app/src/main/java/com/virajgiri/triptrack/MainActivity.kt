@@ -37,6 +37,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.onDispose
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -555,6 +557,16 @@ private fun ProfileScreen(ownerUid: String, onOwnerChanged: (String) -> Unit, on
     var createAccount by remember { mutableStateOf(false) }
     var refresh by remember { mutableStateOf(0) }
     var message by remember { mutableStateOf<String?>(null) }
+    if (auth != null) {
+        DisposableEffect(auth) {
+            val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+                onOwnerChanged(firebaseAuth.currentUser?.uid ?: "local")
+                refresh++
+            }
+            auth.addAuthStateListener(listener)
+            onDispose { auth.removeAuthStateListener(listener) }
+        }
+    }
     val currentUser = remember(auth, refresh) { auth?.currentUser }
 
     Text("Driver profile & account", style = MaterialTheme.typography.headlineSmall)
