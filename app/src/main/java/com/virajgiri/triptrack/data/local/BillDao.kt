@@ -11,6 +11,9 @@ interface BillDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(bill: BillEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(bill: BillEntity)
+
     @Query("SELECT * FROM bills WHERE ownerUid = :ownerUid ORDER BY createdAtEpochMillis DESC")
     fun observeAll(ownerUid: String): Flow<List<BillEntity>>
 
