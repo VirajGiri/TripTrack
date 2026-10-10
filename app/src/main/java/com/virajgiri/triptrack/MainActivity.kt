@@ -213,7 +213,10 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
                 }, onDeleteTrip = { trip ->
                     scope.launch {
                         runCatching { repository.deleteTrip(trip.id) }
-                            .onSuccess { snackbar.showSnackbar("Trip deleted. Existing invoice snapshots are retained.") }
+                            .onSuccess {
+                                FirestoreSyncWorker.enqueue(context, ownerUid)
+                                snackbar.showSnackbar("Trip deleted. Existing invoice snapshots are retained.")
+                            }
                             .onFailure { snackbar.showSnackbar("Could not delete trip.") }
                     }
                 })
@@ -229,7 +232,10 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
                     } },
                     onDelete = { id -> scope.launch {
                         runCatching { repository.deleteClient(id) }
-                            .onSuccess { snackbar.showSnackbar("Client deleted.") }
+                            .onSuccess {
+                                FirestoreSyncWorker.enqueue(context, ownerUid)
+                                snackbar.showSnackbar("Client deleted.")
+                            }
                             .onFailure { snackbar.showSnackbar("Could not delete client.") }
                     } }
                 )
