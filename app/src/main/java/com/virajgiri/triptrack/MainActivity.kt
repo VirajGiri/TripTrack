@@ -241,7 +241,7 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
                 )
                 AppTab.Profile -> ProfileScreen(
                     ownerUid = ownerUid,
-                    onOwnerChanged = onOwnerChanged,
+                    onOwnerChanged = { newOwnerUid -> editingTrip = null; onOwnerChanged(newOwnerUid) },
                     onImportLocalData = {
                         scope.launch {
                             runCatching { repository.claimLocalDataForThisAccount() }
@@ -504,11 +504,11 @@ private fun FormField(label: String, value: String, onValueChange: (String) -> U
 @Composable
 private fun ProfileScreen(ownerUid: String, onOwnerChanged: (String) -> Unit, onImportLocalData: () -> Unit, onSyncNow: () -> Unit) {
     val context = LocalContext.current
-    val preferences = remember { context.getSharedPreferences("triptrack_driver_profile", android.content.Context.MODE_PRIVATE) }
-    var driverName by remember { mutableStateOf(preferences.getString("driverName", "") ?: "") }
-    var driverPhone by remember { mutableStateOf(preferences.getString("driverPhone", "") ?: "") }
-    var vehicleRegistration by remember { mutableStateOf(preferences.getString("vehicleRegistration", "") ?: "") }
-    var vehicleModel by remember { mutableStateOf(preferences.getString("vehicleModel", "") ?: "") }
+    val preferences = remember(ownerUid) { context.getSharedPreferences("triptrack_driver_profile_$ownerUid", android.content.Context.MODE_PRIVATE) }
+    var driverName by remember(ownerUid) { mutableStateOf(preferences.getString("driverName", "") ?: "") }
+    var driverPhone by remember(ownerUid) { mutableStateOf(preferences.getString("driverPhone", "") ?: "") }
+    var vehicleRegistration by remember(ownerUid) { mutableStateOf(preferences.getString("vehicleRegistration", "") ?: "") }
+    var vehicleModel by remember(ownerUid) { mutableStateOf(preferences.getString("vehicleModel", "") ?: "") }
     var profileSaved by remember { mutableStateOf(false) }
     val firebaseConfigured = remember { FirebaseApp.getApps(context).isNotEmpty() }
     val auth = remember(firebaseConfigured) {
@@ -542,7 +542,7 @@ private fun ProfileScreen(ownerUid: String, onOwnerChanged: (String) -> Unit, on
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Firebase setup required", style = MaterialTheme.typography.titleMedium)
                 Text("Add app/google-services.json for package com.virajgiri.triptrack, enable Email/Password authentication in Firebase Console, then rebuild.")
-                Text("Cloud sync remains disabled until authentication and per-user data ownership are configured.")
+                Text("Cloud sync is unavailable until Firebase project configuration is added.")
             }
         }
         return
@@ -553,7 +553,7 @@ private fun ProfileScreen(ownerUid: String, onOwnerChanged: (String) -> Unit, on
                 Text("Signed in", style = MaterialTheme.typography.titleMedium)
                 Text(currentUser.email ?: currentUser.uid)
                 Text("Account-scoped local records are separated by UID.")
-                Text("Cloud upload sends pending records to this account. It does not download remote changes yet.")
+                Text("Sync restores missing cloud records, uploads pending changes and propagates trip/client deletions. Existing pending local edits are preserved.")
                 Button(onClick = onSyncNow, modifier = Modifier.fillMaxWidth()) { Text("Sync pending records") }
                 Button(onClick = onImportLocalData, modifier = Modifier.fillMaxWidth()) { Text("Import local device records to this account") }
                 Button(onClick = {
