@@ -3,6 +3,7 @@ package com.virajgiri.triptrack
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -41,9 +43,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.virajgiri.triptrack.data.TripRepository
+import com.virajgiri.triptrack.data.local.ClientEntity
 import com.virajgiri.triptrack.data.local.TripEntity
 import com.virajgiri.triptrack.data.local.TripTrackDatabase
+import com.virajgiri.triptrack.domain.billing.BillingCalculator
+import com.virajgiri.triptrack.domain.billing.BillingResult
 import com.virajgiri.triptrack.domain.billing.TripInputValidator
+import com.virajgiri.triptrack.domain.billing.TripPackage
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.util.UUID
@@ -59,7 +65,8 @@ private enum class AppTab(val title: String, val icon: ImageVector) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val repository = TripRepository(TripTrackDatabase.getInstance(applicationContext).tripDao())
+        val db = TripTrackDatabase.getInstance(applicationContext)
+        val repository = TripRepository(db.tripDao(), db.clientDao())
         setContent { MaterialTheme { TripTrackApp(repository) } }
     }
 }
@@ -69,6 +76,7 @@ class MainActivity : ComponentActivity() {
 private fun TripTrackApp(repository: TripRepository) {
     var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
     val trips by repository.trips.collectAsStateWithLifecycle(initialValue = emptyList())
+    val clients by repository.clients.collectAsStateWithLifecycle(initialValue = emptyList())
     val tripCount by repository.tripCount.collectAsStateWithLifecycle(initialValue = 0)
     val totalKm by repository.totalKm.collectAsStateWithLifecycle(initialValue = 0.0)
     val totalMinutes by repository.totalDurationMinutes.collectAsStateWithLifecycle(initialValue = 0L)
@@ -106,7 +114,7 @@ private fun TripTrackApp(repository: TripRepository) {
                             val otherPaise = form.other.toPaiseOrNull()
                             when {
                                 form.client.isBlank() -> scope.launch { snackbar.showSnackbar("Client name is required.") }
-                                form.packageType.isBlank() -> scope.launch { snackbar.showSnackbar("Package is required.") }
+                                form.packageType !in listOf("Pickup/drop", "Local", "Outstation") -> scope.launch { snackbar.showSnackbar("Choose Pickup/drop, Local or Outstation exactly.") }
                                 tollPaise == null || otherPaise == null || tollPaise < 0 || otherPaise < 0 -> scope.launch { snackbar.showSnackbar("Enter valid non-negative expenses with up to 2 decimal places.") }
                                 else -> scope.launch {
                                     runCatching {
@@ -114,7 +122,7 @@ private fun TripTrackApp(repository: TripRepository) {
                                             id = UUID.randomUUID().toString(),
                                             tripDate = valid.date.toString(),
                                             clientName = form.client.trim(),
-                                            packageType = form.packageType.trim(),
+                                            packageType = form.packageType,
                                             guestName = form.guest.trim(),
                                             vehicleNumber = form.vehicle.trim(),
                                             startTime = valid.startTime.toString(),
@@ -139,9 +147,35 @@ private fun TripTrackApp(repository: TripRepository) {
                         onFailure = { error -> scope.launch { snackbar.showSnackbar(error.message ?: "Please check trip details.") } }
                     )
                 }
-                AppTab.Trips -> TripsScreen(trips)
-                AppTab.Clients -> PlaceholderScreen("Clients and rate cards", "Client profiles and configurable package rates are the next implementation step.")
-                AppTab.Profile -> PlaceholderScreen("Driver profile", "Driver, vehicle and account settings are the next implementation step.")
+                AppTab.Trips -> TripsScreen(trips, clients) { trip, client ->
+                    val packageType = when (trip.packageType) {
+                        "Pickup/drop" -> TripPackage.PICKUP_DROP
+                        "Local" -> TripPackage.LOCAL
+                        else -> TripPackage.OUTSTATION
+                    }
+                    when (val result = BillingCalculator.calculate(client, packageType, trip.distanceKm, trip.durationMinutes)) {
+                        is BillingResult.MissingRate -> scope.launch { snackbar.showSnackbar("Cannot bill: configure ${result.rateName} for this client first.") }
+                        is BillingResult.UnsupportedTrip -> scope.launch { snackbar.showSnackbar("Cannot bill: ${result.reason}") }
+                        is BillingResult.Success -> scope.launch {
+                            val totalWithExpenses = result.bill.totalPaise + trip.tollPaise + trip.otherExpensePaise
+                            snackbar.showSnackbar("Bill preview for ${trip.clientName}: ${result.bill.lines.size} rate line(s), ₹${"%.2f".format(totalWithExpenses / 100.0)} including expenses. PDF/snapshot next.")
+                        }
+                    }
+                }
+                AppTab.Clients -> ClientManagementScreen(
+                    clients = clients,
+                    onSave = { client -> scope.launch {
+                        runCatching { repository.saveClient(client) }
+                            .onSuccess { snackbar.showSnackbar("Client and rate card saved.") }
+                            .onFailure { snackbar.showSnackbar("Could not save client: ${it.message ?: "unknown error"}") }
+                    } },
+                    onDelete = { id -> scope.launch {
+                        runCatching { repository.deleteClient(id) }
+                            .onSuccess { snackbar.showSnackbar("Client deleted.") }
+                            .onFailure { snackbar.showSnackbar("Could not delete client.") }
+                    } }
+                )
+                AppTab.Profile -> PlaceholderScreen("Driver profile", "Driver, vehicle and account settings are planned. Cloud sign-in is not configured yet.")
             }
         }
     }
@@ -157,6 +191,13 @@ private fun String.toPaiseOrNull(): Long? = runCatching {
     val value = trim().toBigDecimal()
     if (value < BigDecimal.ZERO || value.scale() > 2) null else value.movePointRight(2).longValueExact()
 }.getOrNull()
+
+private fun String.optionalPaise(): Long? {
+    if (isBlank()) return null
+    return toPaiseOrNull() ?: throw IllegalArgumentException("Rates must be non-negative amounts with up to 2 decimal places.")
+}
+
+private fun money(paise: Long?): String = paise?.let { "₹%.2f".format(it / 100.0) } ?: "Not set"
 
 @Composable
 private fun DashboardScreen(count: Int, km: Double, minutes: Long, onAddTrip: () -> Unit) {
@@ -176,7 +217,7 @@ private fun DashboardScreen(count: Int, km: Double, minutes: Long, onAddTrip: ()
             Button(onClick = onAddTrip) { Text("Add trip") }
         }
     }
-    Text("Billable totals will be enabled after client rate cards and billing rules are implemented.", style = MaterialTheme.typography.bodySmall)
+    Text("Bill preview uses client-configured rates. Finalized invoices and dashboard billing totals are not implemented yet.", style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -191,7 +232,7 @@ private fun SummaryCard(title: String, value: String, modifier: Modifier = Modif
 private fun ManualTripScreen(onSave: (TripForm) -> Unit) {
     var date by remember { mutableStateOf("") }
     var client by remember { mutableStateOf("") }
-    var packageType by remember { mutableStateOf("") }
+    var packageType by remember { mutableStateOf("Local") }
     var guest by remember { mutableStateOf("") }
     var vehicle by remember { mutableStateOf("") }
     var startTime by remember { mutableStateOf("") }
@@ -204,8 +245,8 @@ private fun ManualTripScreen(onSave: (TripForm) -> Unit) {
     Text("Enter trip details", style = MaterialTheme.typography.headlineSmall)
     Text("Manual entry only. No GPS tracking is used.")
     FormField("Trip date (YYYY-MM-DD)", date) { date = it }
-    FormField("Client name", client) { client = it }
-    FormField("Package (Pickup/drop, Local, Outstation)", packageType) { packageType = it }
+    FormField("Client name (must match client profile)", client) { client = it }
+    FormField("Package: Pickup/drop, Local, Outstation", packageType) { packageType = it }
     FormField("Guest name (optional)", guest) { guest = it }
     FormField("Vehicle registration", vehicle) { vehicle = it }
     FormField("Start time (HH:MM)", startTime) { startTime = it }
@@ -218,18 +259,128 @@ private fun ManualTripScreen(onSave: (TripForm) -> Unit) {
 }
 
 @Composable
-private fun TripsScreen(trips: List<TripEntity>) {
+private fun TripsScreen(
+    trips: List<TripEntity>,
+    clients: List<ClientEntity>,
+    onPreviewBill: (TripEntity, ClientEntity) -> Unit
+) {
     Text("Trip history", style = MaterialTheme.typography.headlineSmall)
     if (trips.isEmpty()) Text("No trips saved yet. Use Track Trip to add your first trip.")
     trips.forEach { trip ->
+        val client = clients.firstOrNull { it.name.trim().equals(trip.clientName.trim(), ignoreCase = true) }
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text("${trip.clientName} · ${trip.tripDate}", style = MaterialTheme.typography.titleMedium)
             Text("${trip.packageType} · ${"%.1f".format(trip.distanceKm)} KM")
             Text("${trip.startTime}–${trip.endTime} · ${trip.durationMinutes / 60}h ${trip.durationMinutes % 60}m")
             Text("Toll: ₹${"%.2f".format(trip.tollPaise / 100.0)} · Other: ₹${"%.2f".format(trip.otherExpensePaise / 100.0)}")
             Text("Sync status: ${trip.syncStatus}", style = MaterialTheme.typography.labelSmall)
+            if (client == null) {
+                Text("Create a matching client profile to calculate this trip's bill.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                OutlinedButton(onClick = { onPreviewBill(trip, client) }, modifier = Modifier.fillMaxWidth()) { Text("Preview bill") }
+            }
         } }
     }
+}
+
+@Composable
+private fun ClientManagementScreen(
+    clients: List<ClientEntity>,
+    onSave: (ClientEntity) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var name by remember { mutableStateOf("") }
+    var contact by remember { mutableStateOf("") }
+    var pickupBase by remember { mutableStateOf("") }
+    var pickupHour by remember { mutableStateOf("") }
+    var pickupKm by remember { mutableStateOf("") }
+    var localBase by remember { mutableStateOf("") }
+    var localHour by remember { mutableStateOf("") }
+    var localKm by remember { mutableStateOf("") }
+    var outstationDaily by remember { mutableStateOf("") }
+    var outstationKm by remember { mutableStateOf("12") }
+    var formError by remember { mutableStateOf<String?>(null) }
+
+    fun loadClient(client: ClientEntity) {
+        editingId = client.id
+        name = client.name
+        contact = client.contact
+        pickupBase = client.pickupBasePaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        pickupHour = client.pickupExtraHourPaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        pickupKm = client.pickupExtraKmPaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        localBase = client.localBasePaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        localHour = client.localExtraHourPaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        localKm = client.localExtraKmPaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        outstationDaily = client.outstationDailyPaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        outstationKm = client.outstationExtraKmPaise?.let { "%.2f".format(it / 100.0) } ?: ""
+        formError = null
+    }
+
+    Text("Client profiles & rate cards", style = MaterialTheme.typography.headlineSmall)
+    Text("Leave an unknown rate blank. Billing will stop if a required rate is missing.")
+    if (clients.isEmpty()) Text("No clients yet.")
+    clients.forEach { client ->
+        Card(Modifier.fillMaxWidth().clickable { loadClient(client) }) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(client.name, style = MaterialTheme.typography.titleMedium)
+                if (client.contact.isNotBlank()) Text(client.contact)
+                Text("Pickup/drop base: ${money(client.pickupBasePaise)} · Local base: ${money(client.localBasePaise)}")
+                Text("Outstation/day: ${money(client.outstationDailyPaise)} · Outstation extra KM: ${money(client.outstationExtraKmPaise)}")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { loadClient(client) }) { Text("Edit rates") }
+                    OutlinedButton(onClick = { onDelete(client.id); if (editingId == client.id) { editingId = null; name = "" } }) { Text("Delete") }
+                }
+            }
+        }
+    }
+    Text(if (editingId == null) "Add client" else "Edit client", style = MaterialTheme.typography.titleLarge)
+    FormField("Client/company name *", name) { name = it; formError = null }
+    FormField("Contact details (optional)", contact) { contact = it }
+    Text("Pickup/drop · allowance 4 hours or 40 KM", style = MaterialTheme.typography.titleMedium)
+    FormField("Base rate (₹)", pickupBase) { pickupBase = it }
+    FormField("Extra hour rate (₹/hour)", pickupHour) { pickupHour = it }
+    FormField("Extra distance rate (₹/KM)", pickupKm) { pickupKm = it }
+    Text("Local · allowance 8 hours or 80 KM", style = MaterialTheme.typography.titleMedium)
+    FormField("Base rate (₹)", localBase) { localBase = it }
+    FormField("Extra hour rate (₹/hour)", localHour) { localHour = it }
+    FormField("Extra distance rate (₹/KM)", localKm) { localKm = it }
+    Text("Outstation · 300 KM/day; known extra distance rate ₹12/KM", style = MaterialTheme.typography.titleMedium)
+    FormField("Base daily rate (₹)", outstationDaily) { outstationDaily = it }
+    FormField("Extra distance rate (₹/KM)", outstationKm) { outstationKm = it }
+    if (formError != null) Text(formError!!, color = MaterialTheme.colorScheme.error)
+    Button(onClick = {
+        try {
+            if (name.isBlank()) throw IllegalArgumentException("Client name is required.")
+            val fields = listOf(pickupBase, pickupHour, pickupKm, localBase, localHour, localKm, outstationDaily, outstationKm)
+            val parsed = fields.map { it.optionalPaise() }
+            if (parsed.any { it != null && it < 0L }) throw IllegalArgumentException("Rates cannot be negative.")
+            onSave(ClientEntity(
+                id = editingId ?: UUID.randomUUID().toString(),
+                name = name.trim(),
+                contact = contact.trim(),
+                pickupBasePaise = parsed[0],
+                pickupExtraHourPaise = parsed[1],
+                pickupExtraKmPaise = parsed[2],
+                localBasePaise = parsed[3],
+                localExtraHourPaise = parsed[4],
+                localExtraKmPaise = parsed[5],
+                outstationDailyPaise = parsed[6],
+                outstationExtraKmPaise = parsed[7],
+                updatedAtEpochMillis = System.currentTimeMillis()
+            ))
+            editingId = null
+            name = ""; contact = ""; pickupBase = ""; pickupHour = ""; pickupKm = ""
+            localBase = ""; localHour = ""; localKm = ""; outstationDaily = ""; outstationKm = "12"
+            formError = null
+        } catch (error: IllegalArgumentException) {
+            formError = error.message ?: "Please check rate values."
+        }
+    }, modifier = Modifier.fillMaxWidth()) { Text(if (editingId == null) "Save client" else "Save changes") }
+    if (editingId != null) OutlinedButton(onClick = {
+        editingId = null; name = ""; contact = ""; pickupBase = ""; pickupHour = ""; pickupKm = ""
+        localBase = ""; localHour = ""; localKm = ""; outstationDaily = ""; outstationKm = "12"; formError = null
+    }, modifier = Modifier.fillMaxWidth()) { Text("Cancel edit") }
 }
 
 @Composable
