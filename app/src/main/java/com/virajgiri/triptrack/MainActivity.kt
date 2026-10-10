@@ -1,5 +1,6 @@
 package com.virajgiri.triptrack
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,6 +33,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.virajgiri.triptrack.data.InvoiceSnapshotFactory
 import com.virajgiri.triptrack.data.TripRepository
+import com.virajgiri.triptrack.data.local.BillEntity
 import com.virajgiri.triptrack.data.local.ClientEntity
 import com.virajgiri.triptrack.data.local.TripEntity
 import com.virajgiri.triptrack.data.local.TripTrackDatabase
@@ -50,6 +54,7 @@ import com.virajgiri.triptrack.domain.billing.BillingCalculator
 import com.virajgiri.triptrack.domain.billing.BillingResult
 import com.virajgiri.triptrack.domain.billing.TripInputValidator
 import com.virajgiri.triptrack.domain.billing.TripPackage
+import com.virajgiri.triptrack.util.InvoicePdfExporter
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.util.UUID
@@ -66,7 +71,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = TripTrackDatabase.getInstance(applicationContext)
-        val repository = TripRepository(db.tripDao(), db.clientDao())
+        val repository = TripRepository(db.tripDao(), db.clientDao(), db.billDao())
         setContent { MaterialTheme { TripTrackApp(repository) } }
     }
 }
@@ -77,6 +82,8 @@ private fun TripTrackApp(repository: TripRepository) {
     var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
     val trips by repository.trips.collectAsStateWithLifecycle(initialValue = emptyList())
     val clients by repository.clients.collectAsStateWithLifecycle(initialValue = emptyList())
+    val bills by repository.bills.collectAsStateWithLifecycle(initialValue = emptyList())
+    val context = LocalContext.current
     val tripCount by repository.tripCount.collectAsStateWithLifecycle(initialValue = 0)
     val totalKm by repository.totalKm.collectAsStateWithLifecycle(initialValue = 0.0)
     val totalMinutes by repository.totalDurationMinutes.collectAsStateWithLifecycle(initialValue = 0L)
@@ -147,7 +154,7 @@ private fun TripTrackApp(repository: TripRepository) {
                         onFailure = { error -> scope.launch { snackbar.showSnackbar(error.message ?: "Please check trip details.") } }
                     )
                 }
-                AppTab.Trips -> TripsScreen(trips, clients) { trip, client ->
+                AppTab.Trips -> TripsScreen(trips, clients, bills, onPreviewBill = { trip, client ->
                     val packageType = when (trip.packageType) {
                         "Pickup/drop" -> TripPackage.PICKUP_DROP
                         "Local" -> TripPackage.LOCAL
@@ -157,11 +164,26 @@ private fun TripTrackApp(repository: TripRepository) {
                         is BillingResult.MissingRate -> scope.launch { snackbar.showSnackbar("Cannot bill: configure ${result.rateName} for this client first.") }
                         is BillingResult.UnsupportedTrip -> scope.launch { snackbar.showSnackbar("Cannot bill: ${result.reason}") }
                         is BillingResult.Success -> scope.launch {
-                            val totalWithExpenses = result.bill.totalPaise + trip.tollPaise + trip.otherExpensePaise
-                            snackbar.showSnackbar("Bill preview for ${trip.clientName}: ${result.bill.lines.size} rate line(s), ₹${"%.2f".format(totalWithExpenses / 100.0)} including expenses. PDF/snapshot next.")
+                            runCatching {
+                                val snapshot = InvoiceSnapshotFactory.create(trip, result.bill)
+                                repository.saveBill(snapshot)
+                                val pdf = InvoicePdfExporter.createPdf(context, snapshot)
+                                context.startActivity(Intent.createChooser(InvoicePdfExporter.shareIntent(context, pdf), "Share TripTrack invoice"))
+                            }.onSuccess {
+                                snackbar.showSnackbar("Invoice snapshot saved. Share the generated PDF.")
+                            }.onFailure { error ->
+                                snackbar.showSnackbar("Invoice could not be generated: ${error.message ?: "unknown error"}")
+                            }
                         }
                     }
-                }
+                }, onShareSavedBill = { bill ->
+                    scope.launch {
+                        runCatching {
+                            val pdf = InvoicePdfExporter.createPdf(context, bill)
+                            context.startActivity(Intent.createChooser(InvoicePdfExporter.shareIntent(context, pdf), "Share TripTrack invoice"))
+                        }.onFailure { error -> snackbar.showSnackbar("Could not export invoice: ${error.message ?: "unknown error"}") }
+                    }
+                })
                 AppTab.Clients -> ClientManagementScreen(
                     clients = clients,
                     onSave = { client -> scope.launch {
@@ -262,7 +284,9 @@ private fun ManualTripScreen(onSave: (TripForm) -> Unit) {
 private fun TripsScreen(
     trips: List<TripEntity>,
     clients: List<ClientEntity>,
-    onPreviewBill: (TripEntity, ClientEntity) -> Unit
+    bills: List<BillEntity>,
+    onPreviewBill: (TripEntity, ClientEntity) -> Unit,
+    onShareSavedBill: (BillEntity) -> Unit
 ) {
     Text("Trip history", style = MaterialTheme.typography.headlineSmall)
     if (trips.isEmpty()) Text("No trips saved yet. Use Track Trip to add your first trip.")
@@ -277,9 +301,22 @@ private fun TripsScreen(
             if (client == null) {
                 Text("Create a matching client profile to calculate this trip's bill.", style = MaterialTheme.typography.bodySmall)
             } else {
-                OutlinedButton(onClick = { onPreviewBill(trip, client) }, modifier = Modifier.fillMaxWidth()) { Text("Preview bill") }
+                OutlinedButton(onClick = { onPreviewBill(trip, client) }, modifier = Modifier.fillMaxWidth()) { Text("Create invoice PDF") }
             }
         } }
+    }
+    Text("Saved invoice snapshots", style = MaterialTheme.typography.titleLarge)
+    if (bills.isEmpty()) Text("No invoices generated yet.")
+    bills.forEach { bill ->
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(bill.clientNameSnapshot, style = MaterialTheme.typography.titleMedium)
+                Text("${bill.tripDateSnapshot} · ${bill.packageTypeSnapshot} · ${"%.1f".format(bill.distanceKmSnapshot)} KM")
+                Text("Total: ₹${"%.2f".format(bill.totalPaise / 100.0)}")
+                Text("Invoice snapshot is fixed; later rate edits will not change it.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = { onShareSavedBill(bill) }) { Text("Share PDF again") }
+            }
+        }
     }
 }
 
