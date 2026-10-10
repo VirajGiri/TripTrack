@@ -1,5 +1,6 @@
 package com.virajgiri.triptrack.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -20,5 +21,7 @@ data class ClientEntity(
     val localExtraKmPaise: Long? = null,
     val outstationDailyPaise: Long? = null,
     val outstationExtraKmPaise: Long? = 1200L,
-    val updatedAtEpochMillis: Long
+    val updatedAtEpochMillis: Long,
+    val syncStatus: String = "PENDING",
+    @ColumnInfo(defaultValue = "'local'") val ownerUid: String = "local"
 )
