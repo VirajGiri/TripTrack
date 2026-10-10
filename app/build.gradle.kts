@@ -41,3 +41,8 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+// Firebase config is optional during local UI development. Add app/google-services.json to enable Firebase resources.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
