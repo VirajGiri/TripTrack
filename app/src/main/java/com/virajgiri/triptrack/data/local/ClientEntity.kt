@@ -22,6 +22,6 @@ data class ClientEntity(
     val outstationDailyPaise: Long? = null,
     val outstationExtraKmPaise: Long? = 1200L,
     val updatedAtEpochMillis: Long,
-    val syncStatus: String = "PENDING",
+    @ColumnInfo(defaultValue = "'PENDING'") val syncStatus: String = "PENDING",
     @ColumnInfo(defaultValue = "'local'") val ownerUid: String = "local"
 )
