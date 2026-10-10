@@ -43,6 +43,15 @@ class FirestoreSyncWorker(
             val firestore = FirebaseFirestore.getInstance()
             val userCollection = firestore.collection("users").document(requestedUid)
 
+            // Apply remote deletion tombstones before restoring ordinary documents.
+            Tasks.await(userCollection.collection("deletedRecords").get()).documents.forEach { tombstone ->
+                val recordId = tombstone.getString("recordId") ?: ""
+                when (tombstone.getString("collectionName")) {
+                    "trips" -> database.tripDao().markDeletedFromCloud(recordId, requestedUid)
+                    "clients" -> database.clientDao().markDeletedFromCloud(recordId, requestedUid)
+                }
+            }
+
             // Pull only records not already present locally. Conflicting rows are left untouched.
             Tasks.await(userCollection.collection("trips").get()).documents.forEach { doc ->
                 if (database.tripDao().findById(doc.id, requestedUid) == null) {
@@ -116,6 +125,17 @@ class FirestoreSyncWorker(
             }
 
             database.tripDao().pendingForSync(requestedUid).forEach { trip ->
+                if (trip.syncStatus.startsWith("DELETED")) {
+                    val tombstone = mapOf(
+                        "collectionName" to "trips",
+                        "recordId" to trip.id,
+                        "deletedAtEpochMillis" to System.currentTimeMillis()
+                    )
+                    Tasks.await(userCollection.collection("deletedRecords").document("trips_${trip.id}").set(tombstone))
+                    Tasks.await(userCollection.collection("trips").document(trip.id).delete())
+                    database.tripDao().markSynced(trip.id, requestedUid)
+                    return@forEach
+                }
                 val payload = mapOf(
                     "id" to trip.id, "ownerUid" to trip.ownerUid,
                     "tripDate" to trip.tripDate, "clientName" to trip.clientName,
@@ -132,6 +152,17 @@ class FirestoreSyncWorker(
             }
 
             database.clientDao().pendingForSync(requestedUid).forEach { client ->
+                if (client.syncStatus.startsWith("DELETED")) {
+                    val tombstone = mapOf(
+                        "collectionName" to "clients",
+                        "recordId" to client.id,
+                        "deletedAtEpochMillis" to System.currentTimeMillis()
+                    )
+                    Tasks.await(userCollection.collection("deletedRecords").document("clients_${client.id}").set(tombstone))
+                    Tasks.await(userCollection.collection("clients").document(client.id).delete())
+                    database.clientDao().markSynced(client.id, requestedUid)
+                    return@forEach
+                }
                 val payload = mapOf(
                     "id" to client.id, "ownerUid" to client.ownerUid,
                     "name" to client.name, "contact" to client.contact,
