@@ -12,6 +12,7 @@ Offline-first Android application for manual driver trip entry, client rate card
 ## Phase 1 behavior
 - Manual trip entry only. No GPS or automatic trip tracking.
 - Track duty time, odometer KM, toll and other expenses.
+- View trip count, distance, duty hours and recorded expenses by day, week, month or year.
 - Client-specific rate cards. Blank rates are treated as unknown and are never guessed.
 - Edit/delete trips and generate invoice PDFs with immutable local invoice snapshots.
 - Local data drives screens and calculations; sign-in does not automatically transfer pre-login local data.
