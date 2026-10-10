@@ -20,6 +20,8 @@ class TripRepository(
     val bills = billDao.observeAll()
 
     suspend fun save(trip: TripEntity) = dao.insert(trip)
+    suspend fun updateTrip(trip: TripEntity) = dao.update(trip)
+    suspend fun deleteTrip(id: String) = dao.deleteById(id)
     suspend fun saveClient(client: ClientEntity) = clientDao.upsert(client)
     suspend fun deleteClient(id: String) = clientDao.deleteById(id)
     suspend fun getClient(id: String): ClientEntity? = clientDao.findById(id)
