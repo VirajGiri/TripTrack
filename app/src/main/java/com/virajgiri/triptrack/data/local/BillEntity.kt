@@ -1,13 +1,14 @@
 package com.virajgiri.triptrack.data.local
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
  * Immutable invoice snapshot. Store money in paise and line items as a JSON string
  * so later rate-card edits cannot silently change an issued bill.
  */
-@Entity(tableName = "bills")
+@Entity(tableName = "bills", indices = [Index(value = ["tripId"])])
 data class BillEntity(
     @PrimaryKey val id: String,
     val tripId: String,
