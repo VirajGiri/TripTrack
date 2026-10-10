@@ -62,6 +62,8 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
+import java.time.DayOfWeek
+import java.time.LocalDate
 import java.util.UUID
 
 private enum class AppTab(val title: String, val icon: ImageVector) {
@@ -130,7 +132,7 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             when (selectedTab) {
-                AppTab.Dashboard -> DashboardScreen(tripCount, totalKm, totalMinutes) { selectedTab = AppTab.TrackTrip }
+                AppTab.Dashboard -> DashboardScreen(trips, tripCount, totalKm, totalMinutes) { selectedTab = AppTab.TrackTrip }
                 AppTab.TrackTrip -> ManualTripScreen(initialTrip = editingTrip) { form ->
                     val validation = TripInputValidator.validate(form.date, form.startTime, form.endTime, form.startKm, form.endKm)
                     validation.fold(
@@ -282,16 +284,50 @@ private fun String.optionalPaise(): Long? {
 private fun money(paise: Long?): String = paise?.let { "₹%.2f".format(it / 100.0) } ?: "Not set"
 
 @Composable
-private fun DashboardScreen(count: Int, km: Double, minutes: Long, onAddTrip: () -> Unit) {
+private fun DashboardScreen(
+    trips: List<TripEntity>,
+    allTimeCount: Int,
+    allTimeKm: Double,
+    allTimeMinutes: Long,
+    onAddTrip: () -> Unit
+) {
+    var period by remember { mutableStateOf("Daily") }
+    val today = LocalDate.now()
+    val weekStart = today.with(DayOfWeek.MONDAY)
+    val filteredTrips = trips.filter { trip ->
+        val date = runCatching { LocalDate.parse(trip.tripDate) }.getOrNull()
+        date != null && when (period) {
+            "Daily" -> date == today
+            "Weekly" -> !date.isBefore(weekStart) && date.isBefore(weekStart.plusDays(7))
+            "Monthly" -> date.year == today.year && date.month == today.month
+            "Yearly" -> date.year == today.year
+            else -> true
+        }
+    }
+    val periodKm = filteredTrips.sumOf { it.distanceKm }
+    val periodMinutes = filteredTrips.sumOf { it.durationMinutes }
+    val periodExpenses = filteredTrips.sumOf { it.tollPaise + it.otherExpensePaise }
+
     Text("Overview", style = MaterialTheme.typography.headlineSmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Daily", "Weekly", "Monthly", "Yearly").forEach { option ->
+            if (period == option) {
+                Button(onClick = { period = option }, modifier = Modifier.weight(1f)) { Text(option) }
+            } else {
+                OutlinedButton(onClick = { period = option }, modifier = Modifier.weight(1f)) { Text(option) }
+            }
+        }
+    }
+    Text("$period summary", style = MaterialTheme.typography.titleMedium)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        SummaryCard("Total trips", count.toString(), Modifier.weight(1f))
-        SummaryCard("Total KM", "%.1f".format(km), Modifier.weight(1f))
+        SummaryCard("Trips", filteredTrips.size.toString(), Modifier.weight(1f))
+        SummaryCard("Distance KM", "%.1f".format(periodKm), Modifier.weight(1f))
     }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        SummaryCard("Duty hours", "%.1f".format(minutes / 60.0), Modifier.weight(1f))
-        SummaryCard("Billable amount", "—", Modifier.weight(1f))
+        SummaryCard("Duty hours", "%.1f".format(periodMinutes / 60.0), Modifier.weight(1f))
+        SummaryCard("Recorded expenses", "₹%.2f".format(periodExpenses / 100.0), Modifier.weight(1f))
     }
+    Text("All time: $allTimeCount trips · %.1f KM · %.1f duty hours".format(allTimeKm, allTimeMinutes / 60.0), style = MaterialTheme.typography.bodySmall)
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Manual trip entry", style = MaterialTheme.typography.titleMedium)
@@ -299,7 +335,7 @@ private fun DashboardScreen(count: Int, km: Double, minutes: Long, onAddTrip: ()
             Button(onClick = onAddTrip) { Text("Add trip") }
         }
     }
-    Text("Bill preview uses client-configured rates. Finalized invoices and dashboard billing totals are not implemented yet.", style = MaterialTheme.typography.bodySmall)
+    Text("Billable totals are calculated per trip using configured client rates in Trips. Missing rates are never guessed.", style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
