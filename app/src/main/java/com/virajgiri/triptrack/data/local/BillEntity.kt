@@ -1,5 +1,6 @@
 package com.virajgiri.triptrack.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -21,5 +22,6 @@ data class BillEntity(
     val lineItemsJson: String,
     val totalPaise: Long,
     val createdAtEpochMillis: Long,
-    val syncStatus: String = "PENDING"
+    val syncStatus: String = "PENDING",
+    @ColumnInfo(defaultValue = "'local'") val ownerUid: String = "local"
 )
