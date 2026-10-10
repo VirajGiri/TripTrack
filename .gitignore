@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio
+.idea/
+*.iml
+local.properties
+
+# Firebase project configuration (add locally; do not commit)
+app/google-services.json
+
+# Local signing credentials
+*.jks
+*.keystore
