@@ -47,8 +47,14 @@ class FirestoreSyncWorker(
             Tasks.await(userCollection.collection("deletedRecords").get()).documents.forEach { tombstone ->
                 val recordId = tombstone.getString("recordId") ?: ""
                 when (tombstone.getString("collectionName")) {
-                    "trips" -> database.tripDao().markDeletedFromCloud(recordId, requestedUid)
-                    "clients" -> database.clientDao().markDeletedFromCloud(recordId, requestedUid)
+                    "trips" -> {
+                        database.tripDao().markDeletedFromCloud(recordId, requestedUid)
+                        Tasks.await(userCollection.collection("trips").document(recordId).delete())
+                    }
+                    "clients" -> {
+                        database.clientDao().markDeletedFromCloud(recordId, requestedUid)
+                        Tasks.await(userCollection.collection("clients").document(recordId).delete())
+                    }
                 }
             }
 
