@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
@@ -80,6 +82,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun TripTrackApp(repository: TripRepository) {
     var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
+    var editingTrip by remember { mutableStateOf<TripEntity?>(null) }
     val trips by repository.trips.collectAsStateWithLifecycle(initialValue = emptyList())
     val clients by repository.clients.collectAsStateWithLifecycle(initialValue = emptyList())
     val bills by repository.bills.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -113,7 +116,7 @@ private fun TripTrackApp(repository: TripRepository) {
         ) {
             when (selectedTab) {
                 AppTab.Dashboard -> DashboardScreen(tripCount, totalKm, totalMinutes) { selectedTab = AppTab.TrackTrip }
-                AppTab.TrackTrip -> ManualTripScreen { form ->
+                AppTab.TrackTrip -> ManualTripScreen(initialTrip = editingTrip) { form ->
                     val validation = TripInputValidator.validate(form.date, form.startTime, form.endTime, form.startKm, form.endKm)
                     validation.fold(
                         onSuccess = { valid ->
@@ -125,8 +128,8 @@ private fun TripTrackApp(repository: TripRepository) {
                                 tollPaise == null || otherPaise == null || tollPaise < 0 || otherPaise < 0 -> scope.launch { snackbar.showSnackbar("Enter valid non-negative expenses with up to 2 decimal places.") }
                                 else -> scope.launch {
                                     runCatching {
-                                        repository.save(TripEntity(
-                                            id = UUID.randomUUID().toString(),
+                                        val trip = TripEntity(
+                                            id = form.id ?: UUID.randomUUID().toString(),
                                             tripDate = valid.date.toString(),
                                             clientName = form.client.trim(),
                                             packageType = form.packageType,
@@ -140,10 +143,12 @@ private fun TripTrackApp(repository: TripRepository) {
                                             otherExpensePaise = otherPaise,
                                             distanceKm = valid.distanceKm,
                                             durationMinutes = valid.durationMinutes,
-                                            createdAtEpochMillis = System.currentTimeMillis()
-                                        ))
+                                            createdAtEpochMillis = form.createdAtEpochMillis ?: System.currentTimeMillis()
+                                        )
+                                        if (form.id == null) repository.save(trip) else repository.updateTrip(trip)
                                     }.onSuccess {
-                                        snackbar.showSnackbar("Trip saved on this device.")
+                                        snackbar.showSnackbar(if (form.id == null) "Trip saved on this device." else "Trip updated.")
+                                        editingTrip = null
                                         selectedTab = AppTab.Trips
                                     }.onFailure { error ->
                                         snackbar.showSnackbar("Could not save trip: ${error.message ?: "unknown error"}")
@@ -183,6 +188,15 @@ private fun TripTrackApp(repository: TripRepository) {
                             context.startActivity(Intent.createChooser(InvoicePdfExporter.shareIntent(context, pdf), "Share TripTrack invoice"))
                         }.onFailure { error -> snackbar.showSnackbar("Could not export invoice: ${error.message ?: "unknown error"}") }
                     }
+                }, onEditTrip = { trip ->
+                    editingTrip = trip
+                    selectedTab = AppTab.TrackTrip
+                }, onDeleteTrip = { trip ->
+                    scope.launch {
+                        runCatching { repository.deleteTrip(trip.id) }
+                            .onSuccess { snackbar.showSnackbar("Trip deleted. Existing invoice snapshots are retained.") }
+                            .onFailure { snackbar.showSnackbar("Could not delete trip.") }
+                    }
                 })
                 AppTab.Clients -> ClientManagementScreen(
                     clients = clients,
@@ -206,7 +220,8 @@ private fun TripTrackApp(repository: TripRepository) {
 private data class TripForm(
     val date: String, val client: String, val packageType: String, val guest: String,
     val vehicle: String, val startTime: String, val endTime: String, val startKm: String,
-    val endKm: String, val toll: String, val other: String
+    val endKm: String, val toll: String, val other: String,
+    val id: String? = null, val createdAtEpochMillis: Long? = null
 )
 
 private fun String.toPaiseOrNull(): Long? = runCatching {
@@ -251,18 +266,18 @@ private fun SummaryCard(title: String, value: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun ManualTripScreen(onSave: (TripForm) -> Unit) {
-    var date by remember { mutableStateOf("") }
-    var client by remember { mutableStateOf("") }
-    var packageType by remember { mutableStateOf("Local") }
-    var guest by remember { mutableStateOf("") }
-    var vehicle by remember { mutableStateOf("") }
-    var startTime by remember { mutableStateOf("") }
-    var endTime by remember { mutableStateOf("") }
-    var startKm by remember { mutableStateOf("") }
-    var endKm by remember { mutableStateOf("") }
-    var toll by remember { mutableStateOf("0") }
-    var other by remember { mutableStateOf("0") }
+private fun ManualTripScreen(initialTrip: TripEntity?, onSave: (TripForm) -> Unit) {
+    var date by remember(initialTrip?.id) { mutableStateOf(initialTrip?.tripDate ?: "") }
+    var client by remember(initialTrip?.id) { mutableStateOf(initialTrip?.clientName ?: "") }
+    var packageType by remember(initialTrip?.id) { mutableStateOf(initialTrip?.packageType ?: "Local") }
+    var guest by remember(initialTrip?.id) { mutableStateOf(initialTrip?.guestName ?: "") }
+    var vehicle by remember(initialTrip?.id) { mutableStateOf(initialTrip?.vehicleNumber ?: "") }
+    var startTime by remember(initialTrip?.id) { mutableStateOf(initialTrip?.startTime ?: "") }
+    var endTime by remember(initialTrip?.id) { mutableStateOf(initialTrip?.endTime ?: "") }
+    var startKm by remember(initialTrip?.id) { mutableStateOf(initialTrip?.startOdometerKm?.toString() ?: "") }
+    var endKm by remember(initialTrip?.id) { mutableStateOf(initialTrip?.endOdometerKm?.toString() ?: "") }
+    var toll by remember(initialTrip?.id) { mutableStateOf(initialTrip?.let { "%.2f".format(it.tollPaise / 100.0) } ?: "0") }
+    var other by remember(initialTrip?.id) { mutableStateOf(initialTrip?.let { "%.2f".format(it.otherExpensePaise / 100.0) } ?: "0") }
 
     Text("Enter trip details", style = MaterialTheme.typography.headlineSmall)
     Text("Manual entry only. No GPS tracking is used.")
@@ -277,7 +292,7 @@ private fun ManualTripScreen(onSave: (TripForm) -> Unit) {
     FormField("End odometer (KM)", endKm) { endKm = it }
     FormField("Toll (₹)", toll) { toll = it }
     FormField("Other expenses (₹)", other) { other = it }
-    Button(onClick = { onSave(TripForm(date, client, packageType, guest, vehicle, startTime, endTime, startKm, endKm, toll, other)) }, modifier = Modifier.fillMaxWidth()) { Text("Save trip") }
+    Button(onClick = { onSave(TripForm(date, client, packageType, guest, vehicle, startTime, endTime, startKm, endKm, toll, other, initialTrip?.id, initialTrip?.createdAtEpochMillis)) }, modifier = Modifier.fillMaxWidth()) { Text(if (initialTrip == null) "Save trip" else "Update trip") }
 }
 
 @Composable
@@ -286,8 +301,11 @@ private fun TripsScreen(
     clients: List<ClientEntity>,
     bills: List<BillEntity>,
     onPreviewBill: (TripEntity, ClientEntity) -> Unit,
-    onShareSavedBill: (BillEntity) -> Unit
+    onShareSavedBill: (BillEntity) -> Unit,
+    onEditTrip: (TripEntity) -> Unit,
+    onDeleteTrip: (TripEntity) -> Unit
 ) {
+    var pendingDelete by remember { mutableStateOf<TripEntity?>(null) }
     Text("Trip history", style = MaterialTheme.typography.headlineSmall)
     if (trips.isEmpty()) Text("No trips saved yet. Use Track Trip to add your first trip.")
     trips.forEach { trip ->
@@ -298,6 +316,10 @@ private fun TripsScreen(
             Text("${trip.startTime}–${trip.endTime} · ${trip.durationMinutes / 60}h ${trip.durationMinutes % 60}m")
             Text("Toll: ₹${"%.2f".format(trip.tollPaise / 100.0)} · Other: ₹${"%.2f".format(trip.otherExpensePaise / 100.0)}")
             Text("Sync status: ${trip.syncStatus}", style = MaterialTheme.typography.labelSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onEditTrip(trip) }, modifier = Modifier.weight(1f)) { Text("Edit trip") }
+                OutlinedButton(onClick = { pendingDelete = trip }, modifier = Modifier.weight(1f)) { Text("Delete") }
+            }
             if (client == null) {
                 Text("Create a matching client profile to calculate this trip's bill.", style = MaterialTheme.typography.bodySmall)
             } else {
@@ -317,6 +339,15 @@ private fun TripsScreen(
                 OutlinedButton(onClick = { onShareSavedBill(bill) }) { Text("Share PDF again") }
             }
         }
+    }
+    pendingDelete?.let { trip ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete this trip?") },
+            text = { Text("The trip record will be removed. Previously generated invoice snapshots will remain unchanged.") },
+            confirmButton = { TextButton(onClick = { onDeleteTrip(trip); pendingDelete = null }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } }
+        )
     }
 }
 
