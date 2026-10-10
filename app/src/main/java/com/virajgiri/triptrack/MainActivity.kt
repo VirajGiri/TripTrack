@@ -560,7 +560,9 @@ private fun ProfileScreen(ownerUid: String, onOwnerChanged: (String) -> Unit, on
     if (auth != null) {
         DisposableEffect(auth) {
             val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-                onOwnerChanged(firebaseAuth.currentUser?.uid ?: "local")
+                val newUid = firebaseAuth.currentUser?.uid ?: "local"
+                onOwnerChanged(newUid)
+                if (newUid != "local") FirestoreSyncWorker.enqueue(context, newUid)
                 refresh++
             }
             auth.addAuthStateListener(listener)
