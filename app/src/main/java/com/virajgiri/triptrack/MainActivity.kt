@@ -143,6 +143,7 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
                                 tollPaise == null || otherPaise == null || tollPaise < 0 || otherPaise < 0 -> scope.launch { snackbar.showSnackbar("Enter valid non-negative expenses with up to 2 decimal places.") }
                                 else -> scope.launch {
                                     runCatching {
+                                        val now = System.currentTimeMillis()
                                         val trip = TripEntity(
                                             id = form.id ?: UUID.randomUUID().toString(),
                                             tripDate = valid.date.toString(),
@@ -158,7 +159,8 @@ private fun TripTrackApp(repository: TripRepository, ownerUid: String, onOwnerCh
                                             otherExpensePaise = otherPaise,
                                             distanceKm = valid.distanceKm,
                                             durationMinutes = valid.durationMinutes,
-                                            createdAtEpochMillis = form.createdAtEpochMillis ?: System.currentTimeMillis()
+                                            createdAtEpochMillis = form.createdAtEpochMillis ?: now,
+                                            updatedAtEpochMillis = now
                                         )
                                         if (form.id == null) repository.save(trip) else repository.updateTrip(trip)
                                     }.onSuccess {
