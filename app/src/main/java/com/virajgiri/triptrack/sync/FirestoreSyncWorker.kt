@@ -54,51 +54,55 @@ class FirestoreSyncWorker(
 
             // Pull only records not already present locally. Conflicting rows are left untouched.
             Tasks.await(userCollection.collection("trips").get()).documents.forEach { doc ->
-                if (database.tripDao().findById(doc.id, requestedUid) == null) {
-                    database.tripDao().upsert(
-                        TripEntity(
-                            id = doc.id,
-                            tripDate = doc.getString("tripDate") ?: "",
-                            clientName = doc.getString("clientName") ?: "",
-                            packageType = doc.getString("packageType") ?: "",
-                            guestName = doc.getString("guestName") ?: "",
-                            vehicleNumber = doc.getString("vehicleNumber") ?: "",
-                            startTime = doc.getString("startTime") ?: "",
-                            endTime = doc.getString("endTime") ?: "",
-                            startOdometerKm = doc.getDouble("startOdometerKm") ?: 0.0,
-                            endOdometerKm = doc.getDouble("endOdometerKm") ?: 0.0,
-                            tollPaise = doc.getLong("tollPaise") ?: 0L,
-                            otherExpensePaise = doc.getLong("otherExpensePaise") ?: 0L,
-                            distanceKm = doc.getDouble("distanceKm") ?: 0.0,
-                            durationMinutes = doc.getLong("durationMinutes") ?: 0L,
-                            createdAtEpochMillis = doc.getLong("createdAtEpochMillis") ?: 0L,
-                            syncStatus = "SYNCED",
-                            ownerUid = requestedUid
-                        )
-                    )
+                val remote = TripEntity(
+                    id = doc.id,
+                    tripDate = doc.getString("tripDate") ?: "",
+                    clientName = doc.getString("clientName") ?: "",
+                    packageType = doc.getString("packageType") ?: "",
+                    guestName = doc.getString("guestName") ?: "",
+                    vehicleNumber = doc.getString("vehicleNumber") ?: "",
+                    startTime = doc.getString("startTime") ?: "",
+                    endTime = doc.getString("endTime") ?: "",
+                    startOdometerKm = doc.getDouble("startOdometerKm") ?: 0.0,
+                    endOdometerKm = doc.getDouble("endOdometerKm") ?: 0.0,
+                    tollPaise = doc.getLong("tollPaise") ?: 0L,
+                    otherExpensePaise = doc.getLong("otherExpensePaise") ?: 0L,
+                    distanceKm = doc.getDouble("distanceKm") ?: 0.0,
+                    durationMinutes = doc.getLong("durationMinutes") ?: 0L,
+                    createdAtEpochMillis = doc.getLong("createdAtEpochMillis") ?: 0L,
+                    updatedAtEpochMillis = doc.getLong("updatedAtEpochMillis")
+                        ?: doc.getLong("createdAtEpochMillis") ?: 0L,
+                    syncStatus = "SYNCED",
+                    ownerUid = requestedUid
+                )
+                val local = database.tripDao().findById(doc.id, requestedUid)
+                if (local == null || (local.syncStatus == "SYNCED" &&
+                        remote.updatedAtEpochMillis > local.updatedAtEpochMillis)) {
+                    database.tripDao().upsert(remote)
                 }
             }
 
             Tasks.await(userCollection.collection("clients").get()).documents.forEach { doc ->
-                if (database.clientDao().findById(doc.id, requestedUid) == null) {
-                    database.clientDao().upsert(
-                        ClientEntity(
-                            id = doc.id,
-                            name = doc.getString("name") ?: "",
-                            contact = doc.getString("contact") ?: "",
-                            pickupBasePaise = doc.getLong("pickupBasePaise"),
-                            pickupExtraHourPaise = doc.getLong("pickupExtraHourPaise"),
-                            pickupExtraKmPaise = doc.getLong("pickupExtraKmPaise"),
-                            localBasePaise = doc.getLong("localBasePaise"),
-                            localExtraHourPaise = doc.getLong("localExtraHourPaise"),
-                            localExtraKmPaise = doc.getLong("localExtraKmPaise"),
-                            outstationDailyPaise = doc.getLong("outstationDailyPaise"),
-                            outstationExtraKmPaise = doc.getLong("outstationExtraKmPaise"),
-                            updatedAtEpochMillis = doc.getLong("updatedAtEpochMillis") ?: 0L,
-                            syncStatus = "SYNCED",
-                            ownerUid = requestedUid
-                        )
-                    )
+                val remote = ClientEntity(
+                    id = doc.id,
+                    name = doc.getString("name") ?: "",
+                    contact = doc.getString("contact") ?: "",
+                    pickupBasePaise = doc.getLong("pickupBasePaise"),
+                    pickupExtraHourPaise = doc.getLong("pickupExtraHourPaise"),
+                    pickupExtraKmPaise = doc.getLong("pickupExtraKmPaise"),
+                    localBasePaise = doc.getLong("localBasePaise"),
+                    localExtraHourPaise = doc.getLong("localExtraHourPaise"),
+                    localExtraKmPaise = doc.getLong("localExtraKmPaise"),
+                    outstationDailyPaise = doc.getLong("outstationDailyPaise"),
+                    outstationExtraKmPaise = doc.getLong("outstationExtraKmPaise"),
+                    updatedAtEpochMillis = doc.getLong("updatedAtEpochMillis") ?: 0L,
+                    syncStatus = "SYNCED",
+                    ownerUid = requestedUid
+                )
+                val local = database.clientDao().findById(doc.id, requestedUid)
+                if (local == null || (local.syncStatus == "SYNCED" &&
+                        remote.updatedAtEpochMillis > local.updatedAtEpochMillis)) {
+                    database.clientDao().upsert(remote)
                 }
             }
 
