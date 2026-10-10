@@ -12,6 +12,12 @@ interface TripDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(trip: TripEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(trip: TripEntity)
+
+    @Query("SELECT * FROM trips WHERE id = :id AND ownerUid = :ownerUid LIMIT 1")
+    suspend fun findById(id: String, ownerUid: String): TripEntity?
+
     @Update
     suspend fun update(trip: TripEntity)
 
