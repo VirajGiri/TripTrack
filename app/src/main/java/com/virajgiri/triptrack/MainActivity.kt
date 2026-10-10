@@ -57,6 +57,8 @@ import com.virajgiri.triptrack.domain.billing.BillingResult
 import com.virajgiri.triptrack.domain.billing.TripInputValidator
 import com.virajgiri.triptrack.domain.billing.TripPackage
 import com.virajgiri.triptrack.util.InvoicePdfExporter
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.util.UUID
@@ -211,7 +213,7 @@ private fun TripTrackApp(repository: TripRepository) {
                             .onFailure { snackbar.showSnackbar("Could not delete client.") }
                     } }
                 )
-                AppTab.Profile -> PlaceholderScreen("Driver profile", "Driver, vehicle and account settings are planned. Cloud sign-in is not configured yet.")
+                AppTab.Profile -> ProfileScreen()
             }
         }
     }
@@ -454,6 +456,74 @@ private fun ClientManagementScreen(
 @Composable
 private fun FormField(label: String, value: String, onValueChange: (String) -> Unit) {
     OutlinedTextField(value, onValueChange, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+}
+
+@Composable
+private fun ProfileScreen() {
+    val context = LocalContext.current
+    val firebaseConfigured = remember { FirebaseApp.getApps(context).isNotEmpty() }
+    val auth = remember(firebaseConfigured) {
+        if (firebaseConfigured) runCatching { FirebaseAuth.getInstance() }.getOrNull() else null
+    }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var createAccount by remember { mutableStateOf(false) }
+    var refresh by remember { mutableStateOf(0) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val currentUser = remember(auth, refresh) { auth?.currentUser }
+
+    Text("Driver profile & account", style = MaterialTheme.typography.headlineSmall)
+    Text("Driver and vehicle profile fields are not implemented yet.")
+    if (auth == null) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Firebase setup required", style = MaterialTheme.typography.titleMedium)
+                Text("Add app/google-services.json for package com.virajgiri.triptrack, enable Email/Password authentication in Firebase Console, then rebuild.")
+                Text("Cloud sync remains disabled until authentication and per-user data ownership are configured.")
+            }
+        }
+        return
+    }
+    if (currentUser != null) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Signed in", style = MaterialTheme.typography.titleMedium)
+                Text(currentUser.email ?: currentUser.uid)
+                Text("Authentication is connected. Firestore sync is not enabled yet.")
+                Button(onClick = {
+                    auth.signOut()
+                    refresh++
+                    message = "Signed out."
+                }) { Text("Sign out") }
+            }
+        }
+    } else {
+        Text(if (createAccount) "Create account" else "Sign in", style = MaterialTheme.typography.titleMedium)
+        FormField("Email", email) { email = it }
+        FormField("Password", password) { password = it }
+        Button(onClick = {
+            if (email.isBlank() || password.isBlank()) {
+                message = "Enter an email and password."
+            } else {
+                val task = if (createAccount) auth.createUserWithEmailAndPassword(email.trim(), password)
+                    else auth.signInWithEmailAndPassword(email.trim(), password)
+                task.addOnCompleteListener { result ->
+                    if (result.isSuccessful) {
+                        refresh++
+                        message = if (createAccount) "Account created and signed in." else "Signed in."
+                    } else {
+                        message = result.exception?.localizedMessage ?: "Authentication failed."
+                    }
+                }
+            }
+        }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (createAccount) "Create account" else "Sign in")
+        }
+        OutlinedButton(onClick = { createAccount = !createAccount; message = null }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (createAccount) "I already have an account" else "Create a new account")
+        }
+    }
+    if (message != null) Text(message!!, color = MaterialTheme.colorScheme.primary)
 }
 
 @Composable
