@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [TripEntity::class, ClientEntity::class, BillEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class TripTrackDatabase : RoomDatabase() {
@@ -63,12 +63,21 @@ abstract class TripTrackDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE trips ADD COLUMN ownerUid TEXT NOT NULL DEFAULT 'local'")
+                db.execSQL("ALTER TABLE clients ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'PENDING'")
+                db.execSQL("ALTER TABLE clients ADD COLUMN ownerUid TEXT NOT NULL DEFAULT 'local'")
+                db.execSQL("ALTER TABLE bills ADD COLUMN ownerUid TEXT NOT NULL DEFAULT 'local'")
+            }
+        }
+
         fun getInstance(context: Context): TripTrackDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 TripTrackDatabase::class.java,
                 "triptrack.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
         }
     }
 }
