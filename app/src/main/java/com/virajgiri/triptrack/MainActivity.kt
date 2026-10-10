@@ -461,6 +461,12 @@ private fun FormField(label: String, value: String, onValueChange: (String) -> U
 @Composable
 private fun ProfileScreen() {
     val context = LocalContext.current
+    val preferences = remember { context.getSharedPreferences("triptrack_driver_profile", android.content.Context.MODE_PRIVATE) }
+    var driverName by remember { mutableStateOf(preferences.getString("driverName", "") ?: "") }
+    var driverPhone by remember { mutableStateOf(preferences.getString("driverPhone", "") ?: "") }
+    var vehicleRegistration by remember { mutableStateOf(preferences.getString("vehicleRegistration", "") ?: "") }
+    var vehicleModel by remember { mutableStateOf(preferences.getString("vehicleModel", "") ?: "") }
+    var profileSaved by remember { mutableStateOf(false) }
     val firebaseConfigured = remember { FirebaseApp.getApps(context).isNotEmpty() }
     val auth = remember(firebaseConfigured) {
         if (firebaseConfigured) runCatching { FirebaseAuth.getInstance() }.getOrNull() else null
@@ -473,7 +479,21 @@ private fun ProfileScreen() {
     val currentUser = remember(auth, refresh) { auth?.currentUser }
 
     Text("Driver profile & account", style = MaterialTheme.typography.headlineSmall)
-    Text("Driver and vehicle profile fields are not implemented yet.")
+    Text("Driver and vehicle details are stored locally on this device.")
+    FormField("Driver name", driverName) { driverName = it; profileSaved = false }
+    FormField("Phone number", driverPhone) { driverPhone = it; profileSaved = false }
+    FormField("Vehicle registration", vehicleRegistration) { vehicleRegistration = it; profileSaved = false }
+    FormField("Vehicle make/model (optional)", vehicleModel) { vehicleModel = it; profileSaved = false }
+    Button(onClick = {
+        preferences.edit()
+            .putString("driverName", driverName.trim())
+            .putString("driverPhone", driverPhone.trim())
+            .putString("vehicleRegistration", vehicleRegistration.trim())
+            .putString("vehicleModel", vehicleModel.trim())
+            .apply()
+        profileSaved = true
+    }, modifier = Modifier.fillMaxWidth()) { Text("Save driver & vehicle profile") }
+    if (profileSaved) Text("Profile saved on this device.")
     if (auth == null) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
