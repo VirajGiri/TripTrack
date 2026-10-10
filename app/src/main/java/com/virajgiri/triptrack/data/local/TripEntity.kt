@@ -1,6 +1,7 @@
 package com.virajgiri.triptrack.data.local
 
 import androidx.room.ColumnInfo
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -21,6 +22,7 @@ data class TripEntity(
     val distanceKm: Double,
     val durationMinutes: Long,
     val createdAtEpochMillis: Long,
+    @ColumnInfo(defaultValue = "0") val updatedAtEpochMillis: Long = createdAtEpochMillis,
     val syncStatus: String = "PENDING",
     @ColumnInfo(defaultValue = "'local'") val ownerUid: String = "local"
 )
